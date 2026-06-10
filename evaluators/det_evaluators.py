@@ -42,6 +42,7 @@ class DetNuscEvaluator():
         eval_version='detection_cvpr_2019',
         data_root='./data/nuScenes',
         version='v1.0-trainval',
+        # version='v1.0-mini',
         modality=dict(use_lidar=False,
                       use_camera=True,
                       use_radar=True,
@@ -212,16 +213,19 @@ class DetNuscEvaluator():
         result_files, tmp_dir = self.format_results(results, img_metas,
                                                     result_names,
                                                     jsonfile_prefix)
-        if isinstance(result_files, dict):
-            for name in result_names:
-                print('Evaluating bboxes of {}'.format(name))
-                print()
-                self._evaluate_single(result_files[name])
-        elif isinstance(result_files, str):
-            self._evaluate_single(result_files)
+        print("\n 测试推理完成！")
+        print(f"模型的预测结果已保存至：{result_files}")
+        # if isinstance(result_files, dict):
+        #     for name in result_names:
+        #         print('Evaluating bboxes of {}'.format(name))
+        #         print()
+        #         self._evaluate_single(result_files[name])
+        # elif isinstance(result_files, str):
+        #     self._evaluate_single(result_files)
 
         if tmp_dir is not None:
             tmp_dir.cleanup()
+        return {}
 
     def _format_bbox(self, results, img_metas, jsonfile_prefix=None):
         """Convert the results to the standard format.

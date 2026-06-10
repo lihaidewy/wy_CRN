@@ -61,7 +61,7 @@ class CRNLightningModel(BEVDepthLightningModel):
             # 'z_bound': [-5, 3, 8],
             # 'd_bound': [2.0, 58.0, 0.8],
             # 'x_bound': [0.0, 160.0, 1.25],
-            'x_bound': [0.0, 220.0, 1.25],
+            'x_bound': [0.0, 220.0, 0.625],
             # 'x_bound': [0.0, 220.0, 0.8],
             'y_bound': [-25.6, 25.6, 0.4],
             'z_bound': [-2, 6, 8],
@@ -155,7 +155,7 @@ class CRNLightningModel(BEVDepthLightningModel):
             'num_layers': 6,
             'num_heads': 4,
             # 'bev_shape': (128, 128),
-            'bev_shape': (128, 176),
+            'bev_shape': (128, 352),
         }
         ################################################
         self.head_conf = {
@@ -198,7 +198,7 @@ class CRNLightningModel(BEVDepthLightningModel):
                 out_size_factor=1,
                 # voxel_size=[0.2, 0.2, 8],
                 # voxel_size=[0.4, 1.25, 8],
-                voxel_size=[1.25, 0.4, 8],
+                voxel_size=[0.625, 0.4, 8],
                 # pc_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
                 # pc_range=[0.0, -25.6, -2.0, 160.0, 25.6, 6.0],
                 pc_range=[0.0, -25.6, -2.0, 220.0, 25.6, 6.0],
@@ -210,10 +210,10 @@ class CRNLightningModel(BEVDepthLightningModel):
                 point_cloud_range=[0.0, -25.6, -2.0, 220.0, 25.6, 6.0],
                 # grid_size=[512, 512, 1],
                 # grid_size=[128, 128, 1],
-                grid_size=[176, 128, 1],
+                grid_size=[352, 128, 1],
                 # voxel_size=[0.2, 0.2, 8],
                 # voxel_size=[0.4, 1.25, 8],
-                voxel_size=[1.25, 0.4, 8],
+                voxel_size=[0.625, 0.4, 8],
                 # out_size_factor=4,
                 out_size_factor=1,
                 dense_reg=1,
@@ -253,7 +253,7 @@ class CRNLightningModel(BEVDepthLightningModel):
         self.key_idxes = []
         self.num_sweeps = 1
         self.backbone_img_conf['final_dim'] = (384, 1408)
-        self.backbone_img_conf['x_bound'] = [0.0, 220.0, 1.25]
+        self.backbone_img_conf['x_bound'] = [0.0, 220.0, 0.625]
         self.backbone_img_conf['y_bound'] = [-25.6, 25.6, 0.4]
 
         self.ida_aug_conf['final_dim'] = (384, 1408)

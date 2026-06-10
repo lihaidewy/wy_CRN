@@ -150,6 +150,9 @@ def main():
     trainval_nusc = NuScenes(version='v1.0-trainval',
                              dataroot='./data/nuScenes/',
                              verbose=True)
+    # trainval_nusc = NuScenes(version='v1.0-mini',
+    #                          dataroot='./data/nuScenes/',
+    #                          verbose=True)                         
     train_scenes = splits.train
     val_scenes = splits.val
     train_infos_tiny = generate_info(trainval_nusc, train_scenes[:2])

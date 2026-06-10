@@ -27,27 +27,39 @@ pretrain_config = dict(
 
 optimizer_config = dict(
     type='AdamW',
-    lr=2e-4,
+    # lr=2e-4,
+    lr=2e-5,
     weight_decay=1e-2)
 
-H = 900
-W = 1600
-final_dim = (256, 704)
+# H = 900
+# W = 1600
+# final_dim = (256, 704)
+H = 2160
+W = 3840
+# final_dim = (256, 1280)
+final_dim = (384, 1408)
 img_conf = dict(img_mean=[123.675, 116.28, 103.53],
                 img_std=[58.395, 57.12, 57.375],
                 to_rgb=True)
 
 ida_aug_conf = {
-    'resize_lim': (0.386, 0.55),
+    # 'resize_lim': (0.386, 0.55),
+    # 'resize_lim': (0.35, 0.45),
+    'resize_lim': (0.36, 0.38),
     'final_dim': final_dim,
-    'rot_lim': (-5.4, 5.4),
-    'H': 900,
-    'W': 1600,
+    # 'rot_lim': (-5.4, 5.4),
+    'rot_lim': (0, 0),
+    # 'H': 900,
+    # 'W': 1600,
+    'H': 2160,
+    'W': 3840,
     'rand_flip': True,
     'bot_pct_lim': (0.0, 0.0),
-    'cams': ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT',
-             'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'],
-    'Ncams': 6,
+    # 'cams': ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT',
+    #          'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'],
+    'cams': [ 'CAM_FRONT'],
+    # 'Ncams': 6,
+    'Ncams': 1,
 }
 bda_aug_conf = {
     'rot_ratio': 1.0,
@@ -57,16 +69,24 @@ bda_aug_conf = {
     'flip_dy_ratio': 0.5
 }
 rda_aug_conf = {
-    'N_sweeps': 6,
-    'N_use': 5,
+    # 'N_sweeps': 6,
+    # 'N_use': 5,
+    'N_sweeps': 1,
+    'N_use': 1,
     'drop_ratio': 0.1,
 }
 
 backbone_img_conf = {
-    'x_bound': [-51.2, 51.2, 0.8],
-    'y_bound': [-51.2, 51.2, 0.8],
-    'z_bound': [-5, 3, 8],
-    'd_bound': [2.0, 58.0, 0.8],
+    # 'x_bound': [-51.2, 51.2, 0.8],
+    # 'y_bound': [-51.2, 51.2, 0.8],
+    # 'z_bound': [-5, 3, 8],
+    # 'd_bound': [2.0, 58.0, 0.8],
+    'y_bound': [-25.6, 25.6, 0.4],
+    # 'x_bound': [0.0, 160.0, 1.25],
+    'x_bound': [0.0, 220.0, 1.25],
+    'z_bound': [-2, 6, 8],
+    # 'd_bound': [2.0, 162.0, 2.0],
+    'd_bound': [2.0, 222.0, 2.0],
     'final_dim': final_dim,
     'output_channels': 80,
     'downsample_factor': 16,
@@ -89,11 +109,13 @@ backbone_img_conf = {
     'camera_aware': True
 }
 
+# CLASSES = [
+#     'car', 'truck', 'construction_vehicle', 'bus', 'trailer',
+#     'barrier', 'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone',
+# ]
 CLASSES = [
-    'car', 'truck', 'construction_vehicle', 'bus', 'trailer',
-    'barrier', 'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone',
+    'car', 
 ]
-
 head_conf = {
     'bev_backbone_conf': dict(
         type='ResNet',
@@ -110,42 +132,61 @@ head_conf = {
         in_channels=[80, 160, 320, 640],
         upsample_strides=[1, 2, 4, 8],
         out_channels=[64, 64, 64, 64]),
-    'tasks': [
+    # 'tasks': [
+    #     dict(num_class=1, class_names=['car']),
+    #     dict(num_class=2, class_names=['truck', 'construction_vehicle']),
+    #     dict(num_class=2, class_names=['bus', 'trailer']),
+    #     dict(num_class=1, class_names=['barrier']),
+    #     dict(num_class=2, class_names=['motorcycle', 'bicycle']),
+    #     dict(num_class=2, class_names=['pedestrian', 'traffic_cone']),],
+        'tasks': [
         dict(num_class=1, class_names=['car']),
-        dict(num_class=2, class_names=['truck', 'construction_vehicle']),
-        dict(num_class=2, class_names=['bus', 'trailer']),
-        dict(num_class=1, class_names=['barrier']),
-        dict(num_class=2, class_names=['motorcycle', 'bicycle']),
-        dict(num_class=2, class_names=['pedestrian', 'traffic_cone']),],
+        ],
     'common_heads': dict(
         reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2), vel=(2, 2)),
     'bbox_coder': dict(
         type='CenterPointBBoxCoder',
-        post_center_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
+        # post_center_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
+        # post_center_range=[-10.0, -35.6, -10.0, 180.0, 35.6, 10.0],
+        post_center_range=[-10.0, -35.6, -10.0, 240.0, 35.6, 10.0],
         max_num=500,
         score_threshold=0.1,
-        out_size_factor=4,
-        voxel_size=[0.2, 0.2, 8],
-        pc_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
+        # out_size_factor=4,
+        out_size_factor=1,
+        # voxel_size=[0.2, 0.2, 8],
+        voxel_size=[1.25, 0.4, 8],
+        # pc_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
+        # pc_range=[0.0, -25.6, -2.0, 160.0, 25.6, 6.0],
+        pc_range=[0.0, -25.6, -2.0, 220.0, 25.6, 6.0],
         code_size=9),
     'train_cfg': dict(
-        point_cloud_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
-        grid_size=[512, 512, 1],
-        voxel_size=[0.2, 0.2, 8],
-        out_size_factor=4,
+        # point_cloud_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
+        # point_cloud_range=[0.0, -25.6, -2.0, 160.0, 25.6, 6.0],
+        point_cloud_range=[0.0, -25.6, -2.0, 220.0, 25.6, 6.0],
+        # grid_size=[512, 512, 1],
+        # grid_size=[128, 128, 1],
+        grid_size=[176, 128, 1],
+        # voxel_size=[0.2, 0.2, 8],
+        voxel_size=[1.25, 0.4, 8],
+        # out_size_factor=4,
+        out_size_factor=1,
         dense_reg=1,
         gaussian_overlap=0.1,
         max_objs=500,
         min_radius=2,
         code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5]),
     'test_cfg': dict(
-        post_center_limit_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
+        # post_center_limit_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
+        # post_center_limit_range=[-10.0, -35.6, -10.0, 180.0, 35.6, 10.0],
+        post_center_limit_range=[-10.0, -35.6, -10.0, 240.0, 35.6, 10.0],
         max_per_img=500,
         max_pool_nms=False,
         min_radius=[4, 12, 10, 1, 0.85, 0.175],
         score_threshold=0.1,
-        out_size_factor=4,
-        voxel_size=[0.2, 0.2, 8],
+        # out_size_factor=4,
+        out_size_factor=1,
+        # voxel_size=[0.2, 0.2, 8],
+        voxel_size=[1.25, 0.4, 8],
         nms_type='circle',
         pre_max_size=1000,
         post_max_size=83,
@@ -165,7 +206,8 @@ class BEVDepthLightningModel(LightningModule):
 
     def __init__(self,
                  gpus: int = 1,
-                 data_root='data/nuScenes',
+                #  data_root='data/nuScenes',
+                 data_root='data/my_formatted_data',
                  eval_interval=1,
                  batch_size_per_device=8,
                  class_names=CLASSES,
@@ -209,9 +251,15 @@ class BEVDepthLightningModel(LightningModule):
         self.depth_channels = int(
             (self.dbound[1] - self.dbound[0]) / self.dbound[2])
         self.use_fusion = False
-        self.train_info_paths = 'data/nuScenes/nuscenes_infos_train.pkl'
-        self.val_info_paths = 'data/nuScenes/nuscenes_infos_val.pkl'
-        self.predict_info_paths = 'data/nuScenes/nuscenes_infos_test.pkl'
+        # self.train_info_paths = 'data/nuScenes/nuscenes_infos_train.pkl'
+        # self.val_info_paths = 'data/nuScenes/nuscenes_infos_val.pkl'
+        # self.predict_info_paths = 'data/nuScenes/nuscenes_infos_test.pkl'
+        # self.train_info_paths = 'data/nuScenes/nuscenes_infos_train_subset.pkl'
+        # self.val_info_paths = 'data/nuScenes/nuscenes_infos_val_subset.pkl'
+        # self.predict_info_paths = 'data/nuScenes/nuscenes_infos_val_subset.pkl'
+        self.train_info_paths = 'data/my_formatted_data/nuscenes_infos_train.pkl'
+        self.val_info_paths = 'data/my_formatted_data/nuscenes_infos_val.pkl'
+        self.predict_info_paths = 'data/my_formatted_data/nuscenes_infos_val.pkl'
 
         self.return_image = True
         self.return_depth = True
@@ -390,7 +438,10 @@ class BEVDepthLightningModel(LightningModule):
     def configure_optimizers(self):
         optimizer = build_optimizer(self.model, self.optimizer_config)
         scheduler = MultiStepLR(optimizer, [19, 23])
-        return [[optimizer], [scheduler]]
+        # return [[optimizer], [scheduler]]
+        return [optimizer], [scheduler]
+    def lr_scheduler_step(self,scheduler,optimizer_idx,metric):
+        scheduler.step()
 
     def train_dataloader(self):
         train_dataset = NuscDatasetRadarDet(
@@ -419,7 +470,8 @@ class BEVDepthLightningModel(LightningModule):
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=self.batch_size_per_device,
-            num_workers=4,
+            # num_workers=4,
+            num_workers=1,
             drop_last=True,
             shuffle=False,
             collate_fn=partial(collate_fn,

@@ -261,6 +261,8 @@ class NuscDatasetRadarDet(Dataset):
             crop = (crop_w, crop_h, crop_w + fW, crop_h + fH)
             flip = False
             rotate_ida = 0
+        fH, fW = self.ida_aug_conf['final_dim']
+        crop = (crop[0],crop[1],crop[0]+fW,crop[1]+fH)
         return resize, resize_dims, crop, flip, rotate_ida
 
     def sample_bda_augmentation(self):
@@ -443,6 +445,8 @@ class NuscDatasetRadarDet(Dataset):
             radar_idx = self.sample_radar_augmentation()
 
             for sweep_idx, cam_info in enumerate(cam_infos):
+                # self.ida_aug_conf['final_dim'] = (256,1280)
+                # self.ida_aug_conf['final_dim'] = (384,1408)
                 img = Image.open(
                     os.path.join(self.data_root, cam_info[cam]['filename']))
 

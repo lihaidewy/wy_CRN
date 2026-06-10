@@ -10,7 +10,9 @@ from ..modules.multimodal_deformable_cross_attention import DeformableCrossAtten
 
 
 class MFAFuser(nn.Module):
-    def __init__(self, num_sweeps=4, img_dims=80, pts_dims=128, embed_dims=256,
+    # def __init__(self, num_sweeps=4, img_dims=80, pts_dims=128, embed_dims=256,
+    #              num_layers=6, num_heads=4, bev_shape=(128, 128)):
+    def __init__(self, num_sweeps=1, img_dims=80, pts_dims=128, embed_dims=256,
                  num_layers=6, num_heads=4, bev_shape=(128, 128)):
         super(MFAFuser, self).__init__()
 
@@ -79,8 +81,18 @@ class MFAFuser(nn.Module):
                 ),
             )
 
+        # self.reduce_conv = nn.Sequential(
+        #     nn.Conv2d(embed_dims*num_sweeps,
+        #               embed_dims,
+        #               kernel_size=3,
+        #               stride=1,
+        #               padding=1,
+        #               bias=False),
+        #     nn.BatchNorm2d(embed_dims),
+        #     nn.ReLU(inplace=True),
+        # )
         self.reduce_conv = nn.Sequential(
-            nn.Conv2d(embed_dims*num_sweeps,
+            nn.Conv2d(128,
                       embed_dims,
                       kernel_size=3,
                       stride=1,
