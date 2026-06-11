@@ -27,10 +27,10 @@ class CRNLightningModel(BEVDepthLightningModel):
             # 'resize_lim': (0.386, 0.55),
             # 'final_dim': (256, 704),
             # 'resize_lim': (0.35, 0.45),
-            'resize_lim': (0.36, 0.38),
+            'resize_lim': (0.30, 0.45),
             # 'final_dim': (256, 1280),
             'final_dim': (384, 1408),
-            'rot_lim': (0., 0.),
+            'rot_lim': (-3., 3.),
             # 'H': 900,
             # 'W': 1600,
             'H': 2160,
@@ -49,7 +49,7 @@ class CRNLightningModel(BEVDepthLightningModel):
         }
         self.bda_aug_conf = {
             'rot_ratio': 1.0,
-            'rot_lim': (-10.0, 10.0),
+            'rot_lim': (-15.0, 15.0),
             'scale_lim': (0.9, 1.1),
             'flip_dx_ratio': 0.5,
             'flip_dy_ratio': 0.5
@@ -193,7 +193,7 @@ class CRNLightningModel(BEVDepthLightningModel):
                 # post_center_range=[-10.0, -35.6, -10.0, 180.0, 35.6, 10.0],
                 post_center_range=[-10.0, -35.6, -10.0, 240.0, 35.6, 10.0],
                 max_num=500,
-                score_threshold=0.01,
+                score_threshold=0.1,
                 # out_size_factor=4,
                 out_size_factor=1,
                 # voxel_size=[0.2, 0.2, 8],
@@ -217,9 +217,9 @@ class CRNLightningModel(BEVDepthLightningModel):
                 # out_size_factor=4,
                 out_size_factor=1,
                 dense_reg=1,
-                gaussian_overlap=0.1,
+                gaussian_overlap=0.2,
                 max_objs=500,
-                min_radius=2,
+                min_radius=3,
                 # code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
                 # code_weights=[2.0, 2.0, 0.5, 1.5, 1.5, 0.5, 3.0, 3.0, 0.2, 0.2],
                 code_weights=[6.0, 1.0, 0.5, 1.5, 1.5, 0.5, 2.0, 2.0, 0.2, 0.2],
@@ -230,14 +230,14 @@ class CRNLightningModel(BEVDepthLightningModel):
                 post_center_limit_range=[-10.0, -35.6, -10.0, 240.0, 35.6, 10.0],
                 max_per_img=500,
                 max_pool_nms=False,
-                min_radius=[4, 12, 10, 1, 0.85, 0.175],
+                min_radius=[9, 14, 12, 2, 1.0, 0.5],
                 score_threshold=0.01,
                 # out_size_factor=4,
                 out_size_factor=1,
                 voxel_size=[0.2, 0.2, 8],
                 nms_type='circle',
                 pre_max_size=1000,
-                post_max_size=200,
+                post_max_size=150,
                 nms_thr=0.2,
             ),
             'in_channels': 256,  # Equal to bev_neck output_channels.
@@ -294,7 +294,7 @@ class CRNLightningModel(BEVDepthLightningModel):
             # only key-frame will calculate depth loss
             depth_labels = depth_labels[:, 0, ...].contiguous()
         # loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=3.)
-        loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=5.)
+        loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=8.)
        
         self.log('train/detection', loss_detection)
         self.log('train/heatmap', loss_heatmap)
