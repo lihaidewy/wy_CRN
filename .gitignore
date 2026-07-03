@@ -205,6 +205,7 @@ docs/api
 .code-workspace.code-workspace
 output
 outputs/custom_vis_results/
+outputs/det.zip
 # Allow outputs/det/ configs but exclude large checkpoints/logs/images
 outputs/det/**/*.ckpt
 outputs/det/**/events.out.tfevents*
