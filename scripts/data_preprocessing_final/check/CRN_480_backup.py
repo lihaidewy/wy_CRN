@@ -1,3 +1,81 @@
+"""
+mAP: 0.4725
+mATE: 0.5190
+mASE: 0.2819
+mAOE: 0.4936
+mAVE: 0.2732
+mAAE: 0.1779
+NDS: 0.5617
+Eval time: 182.7s
+
+Per-class results:
+Object Class	AP	ATE	ASE	AOE	AVE	AAE
+car	0.719	0.307	0.169	0.129	0.296	0.192
+truck	0.427	0.498	0.219	0.140	0.231	0.190
+bus	0.533	0.565	0.202	0.093	0.389	0.202
+trailer	0.239	0.834	0.255	0.671	0.189	0.075
+construction_vehicle	0.158	0.857	0.500	1.289	0.124	0.354
+pedestrian	0.462	0.561	0.293	0.668	0.358	0.178
+motorcycle	0.541	0.396	0.258	0.599	0.426	0.215
+bicycle	0.459	0.400	0.258	0.707	0.173	0.016
+traffic_cone	0.577	0.397	0.390	nan	nan	nan
+barrier	0.610	0.375	0.276	0.146	nan	nan
+
+img: 18.66
+  img_backbone: 11.22
+  img_dep: 1.51
+  img_transform: 5.15
+  img_pool: 0.54
+pts: 10.62
+  pts_voxelize: 1.92
+  pts_backbone: 6.79
+  pts_head: 1.31
+fusion: 6.80
+  fusion_pre: 0.81
+  fusion_layer: 5.34
+  fusion_post: 0.06
+head: 7.90
+  head_backbone: 2.46
+  head_head: 5.44
+total: 43.97
+
+FPS: 22.74
+
+   | Name                                    | Type                      | Params
+---------------------------------------------------------------------------------------
+0  | model                                   | CameraRadarNetDet         | 61.4 M
+1  | model.backbone_img                      | RVTLSSFPN                 | 31.6 M
+2  | model.backbone_img.img_backbone         | ResNet                    | 23.5 M
+3  | model.backbone_img.img_neck             | SECONDFPN                 | 2.0 M
+4  | model.backbone_img.depth_net            | DepthNet                  | 5.4 M
+5  | model.backbone_img.view_aggregation_net | ViewAggregation           | 807 K
+6  | model.backbone_pts                      | PtsBackbone               | 5.7 M
+7  | model.backbone_pts.pts_voxel_layer      | Voxelization              | 0
+8  | model.backbone_pts.pts_voxel_encoder    | PillarFeatureNet          | 2.3 K
+9  | model.backbone_pts.pts_middle_encoder   | PointPillarsScatter       | 0
+10 | model.backbone_pts.pts_backbone         | SECOND                    | 4.2 M
+11 | model.backbone_pts.pts_neck             | SECONDFPN                 | 180 K
+12 | model.backbone_pts.pred_context         | Sequential                | 679 K
+13 | model.backbone_pts.pred_occupancy       | Sequential                | 664 K
+14 | model.fuser                             | MFAFuser                  | 1.2 M
+15 | model.fuser.norm_img                    | LayerNorm                 | 160
+16 | model.fuser.norm_pts                    | LayerNorm                 | 160
+17 | model.fuser.input_proj                  | Linear                    | 20.6 K
+18 | model.fuser.positional_encoding         | LearnedPositionalEncoding | 16.4 K
+19 | model.fuser.ffn_layers                  | ModuleList                | 395 K
+20 | model.fuser.norm_layers1                | ModuleList                | 1.5 K
+21 | model.fuser.norm_layers2                | ModuleList                | 1.5 K
+22 | model.fuser.attn_layers                 | ModuleList                | 198 K
+23 | model.fuser.reduce_conv                 | Sequential                | 590 K
+24 | model.head                              | BEVDepthHead              | 22.8 M
+25 | model.head.loss_cls                     | GaussianFocalLoss         | 0
+26 | model.head.loss_bbox                    | L1Loss                    | 0
+27 | model.head.shared_conv                  | ConvModule                | 147 K
+28 | model.head.task_heads                   | ModuleList                | 1.4 M
+29 | model.head.trunk                        | ResNet                    | 18.3 M
+30 | model.head.neck                         | SECONDFPN                 | 3.0 M
+---------------------------------------------------------------------------------------
+"""
 import torch
 from utils.torch_dist import synchronize
 
@@ -5,76 +83,49 @@ from exps.base_cli import run_cli
 from exps.base_exp import BEVDepthLightningModel
 
 from models.camera_radar_net_det import CameraRadarNetDet
-import os
-os.environ["PYTHON_CUDA_ALLOC_CONF"] = "sysmem_fallback:false"
+
 
 class CRNLightningModel(BEVDepthLightningModel):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        # self.version = 'v1.0-mini'
-        self.version = 'v1.0-trainval'
+
         self.return_image = True
         self.return_depth = True
         self.return_radar_pv = True
         ################################################
         self.optimizer_config = dict(
             type='AdamW',
-            # lr=2e-4,  # 原作者配置，batch=4 时适用
-            lr=1e-4,   # batch=1 时降低 lr 减少震荡
+            lr=2e-4,
             weight_decay=1e-4)
         ################################################
         self.ida_aug_conf = {
-            # 'resize_lim': (0.386, 0.55),
-            # 'final_dim': (256, 704),
-            # 'resize_lim': (0.35, 0.45),
-            'resize_lim': (0.36, 0.38),
-            # 'final_dim': (256, 1280),
-            'final_dim': (384, 1408),
+            'resize_lim': (0.386, 0.55),
+            'final_dim': (256, 704),
             'rot_lim': (0., 0.),
-            # 'H': 900,
-            # 'W': 1600,
-            'H': 2160,
-            'W': 3840,
+            'H': 900,
+            'W': 1600,
             'rand_flip': True,
             'bot_pct_lim': (0.0, 0.0),
-            # 'cams': [
-            #     'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT',
-            #     'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'
-            # ],
-            # 'Ncams': 6,
             'cams': [
-                 'CAM_FRONT'
+                'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT',
+                'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'
             ],
-            'Ncams': 1,
+            'Ncams': 6,
         }
         self.bda_aug_conf = {
             'rot_ratio': 1.0,
-            # 'rot_lim': (-22.5, 22.5),  # 原作者配置
-            # 'rot_lim': (-15.0, 15.0),   # 中间版本
-            # 'rot_lim': (-10.0, 10.0),   # 上一版本
-            'rot_lim': (-5.0, 5.0),      # 路侧场景 yaw 集中，降低旋转干扰
+            'rot_lim': (-22.5, 22.5),
             'scale_lim': (0.9, 1.1),
             'flip_dx_ratio': 0.5,
             'flip_dy_ratio': 0.5
         }
         ################################################
         self.backbone_img_conf = {
-            # 'x_bound': [-51.2, 51.2, 0.8],
-            # 'y_bound': [-51.2, 51.2, 0.8],
-            # 'z_bound': [-5, 3, 8],
-            # 'd_bound': [2.0, 58.0, 0.8],
-            # 'x_bound': [0.0, 160.0, 1.25],
-            # 'x_bound': [0.0, 220.0, 0.5],  # 历史配置，最远220m
-            'x_bound': [0.0, 240.0, 0.25],      # 扩到240m以覆盖远距离车辆, 0.25m分辨率
-            # 'x_bound': [0.0, 220.0, 0.8],
-            'y_bound': [-25.6, 25.6, 0.4],
-            'z_bound': [-2, 6, 8],
-            # 'd_bound': [2.0, 162.0, 2.0],
-            # 'd_bound': [2.0, 222.0, 2.0],  # 历史配置，最远222m
-            'd_bound': [2.0, 242.0, 2.0],      # 扩到242m匹配x_bound
-            # 'final_dim': (256, 704),
-            # 'final_dim': (256, 1280),
-            'final_dim': (384, 1408),
+            'x_bound': [-51.2, 51.2, 0.8],
+            'y_bound': [-51.2, 51.2, 0.8],
+            'z_bound': [-5, 3, 8],
+            'd_bound': [2.0, 58.0, 0.8],
+            'final_dim': (256, 704),
             'downsample_factor': 16,
             'img_backbone_conf': dict(
                 type='ResNet',
@@ -100,14 +151,8 @@ class CRNLightningModel(BEVDepthLightningModel):
         self.backbone_pts_conf = {
             'pts_voxel_layer': dict(
                 max_num_points=8,
-                # voxel_size=[8, 0.4, 2],
-                # voxel_size=[8, 4.0, 2.0],
-                voxel_size=[8, 1.0, 2.0],
-                # point_cloud_range=[0, 2.0, 0, 704, 58.0, 2],
-                # point_cloud_range=[0, 2.0, 0, 1280, 162.0, 2],
-                # point_cloud_range=[0, 2.0, 0, 1408, 222.0, 2],  # 历史配置，最远222m
-                point_cloud_range=[0, 2.0, 0, 1408, 242.0, 2],
-                
+                voxel_size=[8, 0.4, 2],
+                point_cloud_range=[0, 2.0, 0, 704, 58.0, 2],
                 max_voxels=(768, 1024)
             ),
             'pts_voxel_encoder': dict(
@@ -117,21 +162,15 @@ class CRNLightningModel(BEVDepthLightningModel):
                 with_distance=False,
                 with_cluster_center=False,
                 with_voxel_center=True,
-                # voxel_size=[8, 0.4, 2],
-                voxel_size=[8, 1.0, 2.0],
-                # point_cloud_range=[0, 2.0, 0, 704, 58.0, 2],
-                # point_cloud_range=[0, 2.0, 0, 1280, 162.0, 2],
-                # point_cloud_range=[0, 2.0, 0, 1408, 222.0, 2],  # 历史配置，最远222m
-                point_cloud_range=[0, 2.0, 0, 1408, 242.0, 2],
+                voxel_size=[8, 0.4, 2],
+                point_cloud_range=[0, 2.0, 0, 704, 58.0, 2],
                 norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
                 legacy=True
             ),
             'pts_middle_encoder': dict(
                 type='PointPillarsScatter',
                 in_channels=64,
-                # output_shape=(140, 88)
-                # output_shape=(220, 176)  # 历史配置，对应222m深度
-                output_shape=(240, 176)
+                output_shape=(140, 88)
             ),
             'pts_backbone': dict(
                 type='SECOND',
@@ -161,9 +200,7 @@ class CRNLightningModel(BEVDepthLightningModel):
             'embed_dims': 128,
             'num_layers': 6,
             'num_heads': 4,
-            # 'bev_shape': (128, 128),
-            # 'bev_shape': (128, 440),  # 历史配置，对应220m/0.5m
-            'bev_shape': (128, 960),     # 0.25m分辨率, 960格对应240m
+            'bev_shape': (128, 128),
         }
         ################################################
         self.head_conf = {
@@ -196,82 +233,46 @@ class CRNLightningModel(BEVDepthLightningModel):
                 reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2), vel=(2, 2)),
             'bbox_coder': dict(
                 type='CenterPointBBoxCoder',
-                # post_center_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
-                # post_center_range=[-35.6, -10.0, -10.0, 35.6, 180.0, 10.0],
-                # post_center_range=[-10.0, -35.6, -10.0, 180.0, 35.6, 10.0],
-                # post_center_range=[-10.0, -35.6, -10.0, 240.0, 35.6, 10.0],  # 历史配置220m
-                post_center_range=[-10.0, -35.6, -10.0, 260.0, 35.6, 10.0],
+                post_center_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
                 max_num=500,
-                score_threshold=0.1,
-                out_size_factor=1,
-                voxel_size=[0.25, 0.4, 8],
-                # pc_range=[0.0, -25.6, -2.0, 220.0, 25.6, 6.0],  # 历史配置
-                pc_range=[0.0, -25.6, -2.0, 240.0, 25.6, 6.0],
+                score_threshold=0.01,
+                out_size_factor=4,
+                voxel_size=[0.2, 0.2, 8],
+                pc_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
                 code_size=9,
             ),
             'train_cfg': dict(
-                # point_cloud_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
-                # point_cloud_range=[0.0, -25.6, -2.0, 160.0, 25.6, 6.0],
-                # point_cloud_range=[0.0, -25.6, -2.0, 220.0, 25.6, 6.0],  # 历史配置
-                point_cloud_range=[0.0, -25.6, -2.0, 240.0, 25.6, 6.0],
-                # grid_size=[440, 128, 1],  # 历史配置
-                grid_size=[960, 128, 1],
-                # voxel_size=[0.2, 0.2, 8],
-                # voxel_size=[0.4, 1.25, 8],
-                voxel_size=[0.25, 0.4, 8],
-                # out_size_factor=4,
-                out_size_factor=1,
+                point_cloud_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
+                grid_size=[512, 512, 1],
+                voxel_size=[0.2, 0.2, 8],
+                out_size_factor=4,
                 dense_reg=1,
                 gaussian_overlap=0.1,
                 max_objs=500,
-                min_radius=4,
-                # code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-                # code_weights=[2.0, 2.0, 0.5, 1.5, 1.5, 0.5, 3.0, 3.0, 0.2, 0.2],
-                # code_weights=[6.0, 1.0, 0.5, 1.5, 1.5, 0.5, 2.0, 2.0, 0.2, 0.2],
-                # x=6.0 纵向权重过大，降到 4.0；y 恢复到 2.0，平衡横向精度
-                code_weights=[4.0, 2.0, 0.5, 1.5, 1.5, 0.5, 3.0, 3.0, 0.2, 0.2],
+                min_radius=2,
+                code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
             ),
             'test_cfg': dict(
-                # post_center_limit_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
-                # post_center_limit_range=[-10.0, -35.6, -10.0, 180.0, 35.6, 10.0],
-                # post_center_limit_range=[-10.0, -35.6, -10.0, 240.0, 35.6, 10.0],  # 历史配置
-                post_center_limit_range=[-10.0, -35.6, -10.0, 260.0, 35.6, 10.0],
+                post_center_limit_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
                 max_per_img=500,
                 max_pool_nms=False,
-                min_radius=[9, 14, 12, 2, 1.0, 0.5],
+                min_radius=[4, 12, 10, 1, 0.85, 0.175],
                 score_threshold=0.01,
-                # out_size_factor=4,
-                out_size_factor=1,
-                voxel_size=[0.25, 0.4, 8],
+                out_size_factor=4,
+                voxel_size=[0.2, 0.2, 8],
                 nms_type='circle',
                 pre_max_size=1000,
-                post_max_size=150,
+                post_max_size=200,
                 nms_thr=0.2,
             ),
             'in_channels': 256,  # Equal to bev_neck output_channels.
             'loss_cls': dict(type='GaussianFocalLoss', reduction='mean'),
-            # 'loss_bbox': dict(type='L1Loss', reduction='mean', loss_weight=0.25),
-            # 'loss_bbox': dict(type='L1Loss', reduction='mean', loss_weight=0.5),
-            'loss_bbox': dict(type='SmoothL1Loss',beta=0.05, reduction='mean', loss_weight=0.5),
+            'loss_bbox': dict(type='L1Loss', reduction='mean', loss_weight=0.25),
             'gaussian_overlap': 0.1,
             'min_radius': 2,
         }
         ################################################
-        # self.key_idxes = [-2, -4, -6]
-        self.key_idxes = []
-        self.num_sweeps = 1
-        self.backbone_img_conf['final_dim'] = (384, 1408)
-        self.backbone_img_conf['x_bound'] = [0.0, 240.0, 0.25]
-        self.backbone_img_conf['y_bound'] = [-25.6, 25.6, 0.4]
-
-        self.ida_aug_conf['final_dim'] = (384, 1408)
-        self.ida_aug_conf['W'] = 3840
-        self.ida_aug_conf['H'] = 2160
-        self.ida_aug_conf['cams'] = ['CAM_FRONT']
-        self.ida_aug_conf['Ncams'] = 1
-        # 重新计算 depth 参数（d_bound 在 super().__init__() 之后才修改，需同步更新）
-        self.dbound = self.backbone_img_conf['d_bound']
-        self.depth_channels = int((self.dbound[1] - self.dbound[0]) / self.dbound[2])
+        self.key_idxes = [-2, -4, -6]
         self.model = CameraRadarNetDet(self.backbone_img_conf,
                                        self.backbone_pts_conf,
                                        self.fuser_conf,
@@ -280,7 +281,7 @@ class CRNLightningModel(BEVDepthLightningModel):
     def forward(self, sweep_imgs, mats, is_train=False, **inputs):
         return self.model(sweep_imgs, mats, sweep_ptss=inputs['pts_pv'], is_train=is_train)
 
-    def training_step(self, batch, batch_idx=0):
+    def training_step(self, batch):
         if self.global_rank == 0:
             for pg in self.trainer.optimizers[0].param_groups:
                 self.log('learning_rate', pg["lr"])
@@ -304,12 +305,8 @@ class CRNLightningModel(BEVDepthLightningModel):
         if len(depth_labels.shape) == 5:
             # only key-frame will calculate depth loss
             depth_labels = depth_labels[:, 0, ...].contiguous()
-        # loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=3.)
-        # loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=5.)
-        # 毫米波雷达点云稀疏，depth GT 噪声大，降低权重避免过拟合
-        # loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=1.5)
-        loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=0.5)
-       
+        loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=3.)
+
         self.log('train/detection', loss_detection)
         self.log('train/heatmap', loss_heatmap)
         self.log('train/bbox', loss_bbox)
@@ -355,7 +352,7 @@ class CRNLightningModel(BEVDepthLightningModel):
             if len(depth_labels.shape) == 5:
                 # only key-frame will calculate depth loss
                 depth_labels = depth_labels[:, 0, ...].contiguous()
-            loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=0.5)
+            loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=3.)
         return loss_detection, loss_heatmap, loss_bbox, loss_depth
 
 

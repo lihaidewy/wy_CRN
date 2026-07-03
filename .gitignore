@@ -218,3 +218,35 @@ events.out.tfevents*
 
 # vim
 .vim
+
+### Data & Results (large files) ###
+data/
+work_dirs/
+pretrained/
+
+# CUDA / Miniconda installers (keep locally, don't commit)
+*.run
+*.run.1
+Miniconda3*.sh
+
+# Node.js
+node_modules/
+
+# Claude Code internal
+.claude/
+
+# Generated images/logs/temp files in root
+*.jpg
+*.png
+training_log.txt
+C:Users*
+revised_report.txt
+user_doc.txt
+findings.md
+progress.md
+task_plan.md
+plan_route_b.md
+extract_docx.js
+generate_merged_report*.js
+package.json
+package-lock.json

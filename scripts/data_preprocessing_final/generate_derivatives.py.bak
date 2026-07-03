@@ -1,0 +1,89 @@
+import os
+import numpy as np
+
+# ==============================================================================
+# 1. 真实物理配置区
+# ==============================================================================
+DATA_ROOT = "./data/my_formatted_data" 
+H = 6.0                                    # 龙门架高度（米）
+
+CAMERA_INTRINSIC = np.array([
+    [3325.5375505322445,                0.0, 1920.0],  # [fx, 0, cx]
+    [               0.0, 3325.5375505322445, 1080.0],  # [0, fy, cy]
+    [               0.0,                0.0,    1.0]
+])
+
+os.makedirs(os.path.join(DATA_ROOT, "radar_bev_filter"), exist_ok=True)
+os.makedirs(os.path.join(DATA_ROOT, "radar_pv_filter"), exist_ok=True)
+
+# ==============================================================================
+# 2. 核心特征流批量生成逻辑
+# ==============================================================================
+def make_derivatives_for_all_frames():
+    base_radar_dir = os.path.join(DATA_ROOT, "samples/RADAR_FRONT")
+    if not os.path.exists(base_radar_dir):
+        print(f"[✗] 错误：找不到原始点云目录 {base_radar_dir}，请检查路径！")
+        return
+        
+    bin_files = sorted([f for f in os.listdir(base_radar_dir) if f.endswith('.bin')])
+    print(f">>> 启动步骤二：扫描到 {len(bin_files)} 帧数据，开始生成双流特征...")
+
+    for file_name in bin_files:
+        frame_idx = int(file_name.split('_')[1].split('.')[0])
+        
+        base_bin_path = os.path.join(base_radar_dir, file_name)
+        points_18ch = np.fromfile(base_bin_path, dtype=np.float32).reshape(-1, 18)
+        num_pts = points_18ch.shape[0]
+        
+        # ----------------------------------------------------------------------
+        # 2. 生成 radar_bev_filter (7通道) - 【剔除了错误的交换逻辑】
+        # ----------------------------------------------------------------------
+        radar_bev = np.zeros((num_pts, 7), dtype=np.float32)
+        
+        # 因为前一步 process_radar 已经遵循标准，这里直接直给！
+        radar_bev[:, 0] = points_18ch[:, 0]          # X 深度
+        radar_bev[:, 1] = points_18ch[:, 1]          # Y 横向左右
+        radar_bev[:, 2] = points_18ch[:, 2]          # Z 高度
+        
+        radar_bev[:, 3] = points_18ch[:, 5]        # rcs
+        radar_bev[:, 4:6] = points_18ch[:, 8:10]   # vx_comp, vy_comp
+        radar_bev[:, 6] = 0.0                      # sweep_idx
+        
+        bev_filename = f"radar_{frame_idx:06d}.pcd.bin"
+        radar_bev.tofile(os.path.join(DATA_ROOT, "radar_bev_filter", bev_filename))
+        
+        # ----------------------------------------------------------------------
+        # 3. 生成 radar_pv_filter (7通道) 
+        # ----------------------------------------------------------------------
+        radar_pv = np.zeros((num_pts, 7), dtype=np.float32)
+        
+        for i in range(num_pts):
+            x, y, z = radar_bev[i, 0], radar_bev[i, 1], radar_bev[i, 2]
+            
+            # 【物理严谨映射】：世界/雷达(x前, y左, z上) -> 相机(x右, y下, z前)
+            cam_z = x      
+            cam_x = -y     
+            cam_y = H - z  # 修复为减号：相机高度(7m) - 物体高度(0m) = 在相机下方7m
+            
+            # 透视投影解算像素坐标 (u, v)
+            if cam_z > 0.5:
+                u = (CAMERA_INTRINSIC[0, 0] * cam_x / cam_z) + CAMERA_INTRINSIC[0, 2]
+                v = (CAMERA_INTRINSIC[1, 1] * cam_y / cam_z) + CAMERA_INTRINSIC[1, 2]
+            else:
+                u, v = -1, -1 # 无效点标记为 -1
+            
+            radar_pv[i, 0] = u
+            radar_pv[i, 1] = v
+            radar_pv[i, 2] = cam_z             
+            
+        radar_pv[:, 3] = radar_bev[:, 3]       
+        radar_pv[:, 4:6] = radar_bev[:, 4:6]   
+        radar_pv[:, 6] = 0.0                   
+        
+        pv_filename = f"{frame_idx}.png.bin"
+        radar_pv.tofile(os.path.join(DATA_ROOT, "radar_pv_filter", pv_filename))
+
+    print(f"[✓] 步骤二执行完毕！已成功将真实 4K 内参注入并导出双流特征文件。")
+
+if __name__ == "__main__":
+    make_derivatives_for_all_frames()

@@ -1,0 +1,163 @@
+import os
+import json
+import mmcv
+import numpy as np
+
+# ==============================================================================
+# 1. 路径配置
+# ==============================================================================
+DATA_ROOT = "./data/my_formatted_data"
+JSON_DIR = os.path.join(DATA_ROOT, "jsons")
+
+def yaw_to_quaternion(yaw):
+    """将 json 中的 yaw 角标量弧度转换为四元数 [w, x, y, z]"""
+    return [float(np.cos(yaw / 2)), 0.0, 0.0, float(np.sin(yaw / 2))]
+
+def build_real_infos():
+    if not os.path.exists(JSON_DIR):
+        print(f"❌ 错误：找不到 JSON 目录 {JSON_DIR}")
+        return
+
+    json_files = sorted([f for f in os.listdir(JSON_DIR) if f.endswith('.json')])
+    print(f">>> 发现 {len(json_files)} 帧标注，开始提取...")
+    infos_list = []
+
+    for file_name in json_files:
+        frame_idx = int(file_name.split('.')[0])
+        with open(os.path.join(JSON_DIR, file_name), 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        info = {
+            'scene_name': "real_roadside_scene",
+            'scene_token': "scene_token_real",
+            'sample_token': f"sample_token_{frame_idx:06d}",
+            'timestamp': 1600000000000000 + frame_idx * 100000,
+            'cam_infos': {},
+            'lidar_infos': {},
+            'ann_infos': [],
+            'lidar_sweeps': [],  # 即使没数据，也必须是空列表
+            'cam_sweeps': []     # 即使没数据，也必须是空列表
+        }
+        
+        # 内参设置
+        intrinsics = data.get('intrinsics', {})
+        camera_intrinsic = [
+            [intrinsics.get('fx', 3325.53), 0.0, intrinsics.get('cx', 1920.0)],
+            [0.0, intrinsics.get('fy', 3325.53), intrinsics.get('cy', 1080.0)],
+            [0.0, 0.0, 1.0]
+        ]
+        
+        # ==================== 🚨 核心修复区域 START 🚨 ====================
+        # 1. 强制修正高度：路侧相机离地 6/7 米左右，传感器到世界的平移 Z 必须是正数。
+        translation_cam2world = [0.0, 0.0, 6.0]
+        
+        # 2. 强制修正轴向：相机坐标系 (X右, Y下, Z前) 转换到 自动驾驶世界坐标系 (X前, Y左, Z上)
+        # 对应的四元数 [w, x, y, z] 必须是 [0.5, -0.5, 0.5, -0.5]
+        rotation_cam2world = [0.5, -0.5, 0.5, -0.5]
+        # ==================== 🚨 核心修复区域 END 🚨 ====================
+        
+        # 相机元数据
+        info['cam_infos']['CAM_FRONT'] = {
+            'sample_token': info['sample_token'],
+            'timestamp': info['timestamp'],
+            'filename': f"samples/CAM_FRONT/{frame_idx}.png",
+            'height': 2160, 'width': 3840,
+            'is_key_frame': True,
+            'ego_pose': {'translation': [0.0, 0.0, 0.0], 'rotation': [1.0, 0.0, 0.0, 0.0]},
+            'calibrated_sensor': {
+                'translation': translation_cam2world,
+                'rotation': rotation_cam2world,  
+                'camera_intrinsic': camera_intrinsic
+            }
+        }
+        
+        # 雷达元数据 (雷达坐标系通常和世界坐标系一致，不需要疯狂转轴)
+        info['lidar_infos']['LIDAR_TOP'] = {
+            'sample_token': info['sample_token'],
+            'timestamp': info['timestamp'],
+            'filename': f"radar_bev_filter/radar_{frame_idx:06d}.pcd.bin",
+            'ego_pose': {'translation': [0.0, 0.0, 0.0], 'rotation': [1.0, 0.0, 0.0, 0.0]},
+            'calibrated_sensor': {'translation': [0.0, 0.0, 0.0], 'rotation': [1.0, 0.0, 0.0, 0.0]}
+        }
+
+        # 提取 GT 标注
+        ann_infos = []
+        for obj in data.get('objects', []):
+            cat_map = {
+                'car': 'vehicle.car', 'truck': 'vehicle.truck',
+                'bus': 'vehicle.bus.rigid', 'pedestrian': 'human.pedestrian.adult',
+                'bicycle': 'vehicle.bicycle', 'motorcycle': 'vehicle.motorcycle'
+            }
+            cat_name = cat_map.get(obj.get('category', '').lower(), 'vehicle.car')
+            
+            # 强制 velocity 为 3 维
+            vel_in = obj.get('velocity', [0.0, 0.0, 0.0])
+            vx = float(vel_in[0]) if len(vel_in) > 0 else 0.0
+            vy = float(vel_in[1]) if len(vel_in) > 1 else 0.0
+            vz = float(vel_in[2]) if len(vel_in) > 2 else 0.0
+            velocity_3d = [vx, vy, vz]
+            
+            l, w, h = obj.get('size', [1.0, 1.0, 1.0])
+            #  2. 获取原始底盘坐标 (兼容 translation_cam 或 translation)
+            raw_trans = obj.get('translation', [0.0, 0.0, 0.0])
+            #  3. 终极托举：底盘 Z + h/2 = 中心 Z
+            center_translation = [raw_trans[0], raw_trans[1], raw_trans[2] + (h / 2.0)]
+            #  4. 读取偏航角 (兼容 rotation_cam)
+            raw_yaw = obj.get('rotation', 0.0)
+
+            ann = {
+                'token': obj.get('token', f"token_{np.random.randint(10000)}"),
+                'category_name': cat_name,
+                'translation': center_translation,
+                'size': [l, w, h],
+                'rotation': yaw_to_quaternion(raw_yaw),
+                'velocity': velocity_3d, 
+                'num_lidar_pts': 10,
+                'num_radar_pts': 10
+            }
+            ann_infos.append(ann)
+        
+        info['ann_infos'] = ann_infos
+        infos_list.append(info)
+
+   
+    total_frames = len(infos_list)
+    # =========================================================================
+    #  核心修改：按 80% / 20% 比例严格划分训练集和验证集
+    # =========================================================================
+    # split_ratio = 0.8  # 80% 用于训练，20% 用于验证
+    # split_index = int(total_frames * split_ratio)
+
+    # # 切片操作：确保模型在验证时看到的数据绝对没有在训练时见过
+    # train_infos = infos_list[:split_index]
+    # val_infos = infos_list[split_index:]
+    # =========================================================================
+    # 全量作为训练集，指定偏移量批次作为验证集
+    # 1. 训练集 (Train)：直接使用全部数据！
+    # train_infos = infos_list
+    # # 2. 验证集 (Val)：只挑选出帧号在 200000 到 399999 之间的数据
+    # val_infos = []
+    # for info in infos_list:
+    #     # 从 sample_token_000001 中提取出纯数字帧号
+    #     frame_idx = int(info['sample_token'].split('_')[-1])
+    #     # 判断：如果帧号属于 20万 或 30万 的批次，就加入验证集
+    #     if 200000 <= frame_idx < 400000:
+    #         val_infos.append(info)
+    # =========================================================================
+
+    train_infos = infos_list
+    val_infos = infos_list
+
+    # 导出文件
+    mmcv.dump(train_infos, os.path.join(DATA_ROOT, 'nuscenes_infos_train.pkl'))
+    mmcv.dump(val_infos, os.path.join(DATA_ROOT, 'nuscenes_infos_val.pkl'))
+    
+    print("-" * 65)
+    print(f"✅ 步骤四:PKL索引文件生成完毕! ")
+    print(f"   -> 总数据量: {total_frames} 帧")
+    print(f"   -> 训练集 (Train): {len(train_infos)} 帧 -> nuscenes_infos_train.pkl")
+    print(f"   -> 验证集 (Val):   {len(val_infos)} 帧 -> nuscenes_infos_val.pkl")
+    print("-" * 65)
+
+if __name__ == "__main__":
+    build_real_infos()

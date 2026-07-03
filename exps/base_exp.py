@@ -317,6 +317,37 @@ class BEVDepthLightningModel(LightningModule):
 
         return weight * loss_depth
 
+    def get_depth_loss_distance_aware(self, depth_labels, depth_preds, weight=0.5):
+        """
+        Distance-aware depth loss: 远端像素获得更高权重 (2.0×)，
+        补偿毫米波雷达稀疏导致的远端 depth GT 噪声。
+        近端(2-80m): 0.5×, 中端(82-160m): 1.0×, 远端(162-240m): 2.0×
+        """
+        depth_labels_down = self.get_downsampled_gt_depth(depth_labels)
+        depth_preds_flat = depth_preds.permute(0, 2, 3, 1).contiguous().view(
+            -1, self.depth_channels)
+        fg_mask = torch.max(depth_labels_down, dim=1).values > 0.0
+
+        fg_labels = depth_labels_down[fg_mask]       # (N_fg, D)
+        gt_bins = torch.argmax(fg_labels, dim=1)      # (N_fg,) — 每像素所属 depth bin
+
+        # 每像素 depth weight: 近端 0.5, 中端 1.0, 远端 2.0
+        # depth bins: [0-39]=2-80m, [40-79]=82-160m, [80-119]=162-240m
+        pix_weights = torch.ones_like(gt_bins, dtype=torch.float32, device=gt_bins.device)
+        pix_weights[gt_bins < 40] = 0.5
+        pix_weights[(gt_bins >= 40) & (gt_bins < 80)] = 1.0
+        pix_weights[gt_bins >= 80] = 2.0
+
+        with autocast(enabled=False):
+            preds_fg = depth_preds_flat[fg_mask]
+            # per-pixel BCE (average over D channels), then apply depth weight
+            per_pixel_bce = F.binary_cross_entropy(
+                preds_fg, fg_labels, reduction='none'
+            ).mean(dim=1)  # (N_fg,)
+            loss_depth = (per_pixel_bce * pix_weights).sum() / max(1.0, pix_weights.sum())
+
+        return weight * loss_depth
+
     def get_downsampled_gt_depth(self, gt_depths):
         """
         Input:
@@ -437,8 +468,14 @@ class BEVDepthLightningModel(LightningModule):
 
     def configure_optimizers(self):
         optimizer = build_optimizer(self.model, self.optimizer_config)
-        scheduler = MultiStepLR(optimizer, [19, 23])
-        # return [[optimizer], [scheduler]]
+        # 原作者 24 epoch 的硬编码 milestones
+        # scheduler = MultiStepLR(optimizer, [19, 23])
+        # 改为按 max_epochs 的 80% 和 95% 自动计算
+        max_epochs = getattr(self.trainer, 'max_epochs', 24)
+        m1 = int(max_epochs * 0.80)
+        m2 = int(max_epochs * 0.95)
+        scheduler = MultiStepLR(optimizer, [m1, m2])
+        print(f"[Scheduler] max_epochs={max_epochs}, milestones=[{m1}, {m2}]")
         return [optimizer], [scheduler]
     def lr_scheduler_step(self,scheduler,optimizer_idx,metric):
         scheduler.step()
@@ -471,7 +508,7 @@ class BEVDepthLightningModel(LightningModule):
             train_dataset,
             batch_size=self.batch_size_per_device,
             # num_workers=4,
-            num_workers=1,
+            num_workers=0,
             drop_last=True,
             shuffle=False,
             collate_fn=partial(collate_fn,

@@ -2,12 +2,13 @@
 import torch
 from torch.cuda.amp import autocast
 
-from mmdet.core import reduce_mean, multi_apply
+from mmdet.core import reduce_mean
 from mmdet.models import build_backbone
 from mmdet3d.core import draw_heatmap_gaussian, gaussian_radius
 from mmdet3d.models import build_neck
 from mmdet3d.models.dense_heads.centerpoint_head import CenterHead
 from mmdet3d.models.utils import clip_sigmoid
+from mmdet.core import multi_apply
 
 __all__ = ['BEVDepthHead']
 
@@ -134,21 +135,30 @@ class BEVDepthHead(CenterHead):
 
     def get_targets(self, gt_bboxes_3d, gt_labels_3d):
         """Generate targets with distance-aware weights."""
-        heatmaps, anno_boxes, inds, masks, dist_weights, heatmap_weights = multi_apply(
+        heatmaps, anno_boxes, inds, masks, dist_weights = multi_apply(
             self.get_targets_single, gt_bboxes_3d, gt_labels_3d)
+
+        # Transpose heatmaps
         heatmaps = list(map(list, zip(*heatmaps)))
         heatmaps = [torch.stack(hms_) for hms_ in heatmaps]
+
+        # Transpose anno_boxes
         anno_boxes = list(map(list, zip(*anno_boxes)))
         anno_boxes = [torch.stack(anno_boxes_) for anno_boxes_ in anno_boxes]
+
+        # Transpose inds
         inds = list(map(list, zip(*inds)))
         inds = [torch.stack(inds_) for inds_ in inds]
+
+        # Transpose masks
         masks = list(map(list, zip(*masks)))
         masks = [torch.stack(masks_) for masks_ in masks]
+
+        # Transpose dist_weights (新增)
         dist_weights = list(map(list, zip(*dist_weights)))
         dist_weights = [torch.stack(dw_) for dw_ in dist_weights]
-        heatmap_weights = list(map(list, zip(*heatmap_weights)))
-        heatmap_weights = [torch.stack(hw_) for hw_ in heatmap_weights]
-        return heatmaps, anno_boxes, inds, masks, dist_weights, heatmap_weights
+
+        return heatmaps, anno_boxes, inds, masks, dist_weights
 
     def get_targets_single(self, gt_bboxes_3d, gt_labels_3d):
         """Generate training targets for a single sample.
@@ -201,7 +211,7 @@ class BEVDepthHead(CenterHead):
                 torch.cat(task_class).long().to(gt_bboxes_3d.device))
             flag2 += len(mask)
         draw_gaussian = draw_heatmap_gaussian
-        heatmaps, anno_boxes, inds, masks, dist_weights, heatmap_weights = [], [], [], [], [], []
+        heatmaps, anno_boxes, inds, masks, dist_weights = [], [], [], [], []
 
         for idx, task_head in enumerate(self.task_heads):
             heatmap = gt_bboxes_3d.new_zeros(
@@ -209,14 +219,10 @@ class BEVDepthHead(CenterHead):
                  feature_map_size[0]),
                 device='cuda')
 
-            heatmap_weight = gt_bboxes_3d.new_ones(
-                (len(self.class_names[idx]), feature_map_size[1],
-                 feature_map_size[0]),
-                device='cuda')
-
             anno_box = gt_bboxes_3d.new_zeros((max_objs, 10),
                                               dtype=torch.float32,
                                               device='cuda')
+            # 距离权重（新增）
             dist_weight = gt_bboxes_3d.new_zeros((max_objs,),
                                                   dtype=torch.float32,
                                                   device='cuda')
@@ -250,27 +256,6 @@ class BEVDepthHead(CenterHead):
                     # your box annotation.
                     x, y, z = task_boxes[idx][k][0], task_boxes[idx][k][
                         1], task_boxes[idx][k][2]
-
-                    # ===== 远处目标扩大 Gaussian Radius（场景感知） =====
-                    scenario = self.train_cfg.get('scenario', 'oblique')
-                    if scenario == 'frontal':
-                        # Frontal: 保守扩大，不过度扩散监督信号
-                        if x > 150.0:
-                            radius = int(radius * 2.0)
-                        elif x > 100.0:
-                            radius = int(radius * 1.5)
-                        elif x > 50.0:
-                            radius = int(radius * 1.2)
-                    else:
-                        # Oblique: 原策略（分档扩大）
-                        if x > 150.0:
-                            radius = int(radius * 2.0)
-                        elif x > 100.0:
-                            radius = int(radius * 1.5)
-                        elif x > 50.0:
-                            radius = int(radius * 1.2)
-                    radius = max(self.train_cfg['min_radius'], radius)
-                    # ==================================================
 
                     coor_x = (
                         x - pc_range[0]
@@ -316,42 +301,24 @@ class BEVDepthHead(CenterHead):
                         vy.unsqueeze(0),
                     ])
 
-                    # ===== Distance-Aware Weighting（场景感知） =====
-                    scenario = self.train_cfg.get('scenario', 'oblique')
-                    x_dist = task_boxes[idx][k][0]
-                    if scenario == 'frontal':
-                        # Frontal: 中间段保护 + 远端加码
-                        if x_dist > 150.0:
-                            dist_weight[new_idx] = 2.5   # 远端加码，提升检测率
-                        elif x_dist > 100.0:
-                            dist_weight[new_idx] = 2.0   # 过渡段加强
-                        elif x_dist > 50.0:
-                            dist_weight[new_idx] = 2.0   # 中间段重点
-                        else:
-                            dist_weight[new_idx] = 1.2
+                    # ===== Distance-Aware Weighting =====
+                    x_dist = task_boxes[idx][k][0]  # 纵向距离 x
+                    if x_dist > 150.0:
+                        dist_weight[new_idx] = 3.0
+                    elif x_dist > 100.0:
+                        dist_weight[new_idx] = 2.0
+                    elif x_dist > 50.0:
+                        dist_weight[new_idx] = 1.5
                     else:
-                        # Oblique: 原策略（远处重点）
-                        if x_dist > 150.0:
-                            dist_weight[new_idx] = 3.0
-                        elif x_dist > 100.0:
-                            dist_weight[new_idx] = 2.0
-                        elif x_dist > 50.0:
-                            dist_weight[new_idx] = 1.5
-                        else:
-                            dist_weight[new_idx] = 1.0
-                    # =============================================
-
-                    # ===== 对远处目标 heatmap 中心加权 =====
-                    heatmap_weight[cls_id, center_int[1], center_int[0]] = dist_weight[new_idx]
-                    # =====================================
+                        dist_weight[new_idx] = 1.0
+                    # ====================================
 
             heatmaps.append(heatmap)
             anno_boxes.append(anno_box)
             masks.append(mask)
             inds.append(ind)
             dist_weights.append(dist_weight)
-            heatmap_weights.append(heatmap_weight)
-        return heatmaps, anno_boxes, inds, masks, dist_weights, heatmap_weights
+        return heatmaps, anno_boxes, inds, masks, dist_weights
 
     def loss(self, targets, preds_dicts, **kwargs):
         """Loss function for BEVDepthHead.
@@ -365,25 +332,18 @@ class BEVDepthHead(CenterHead):
         Returns:
             dict[str:torch.Tensor]: Loss of heatmap and bbox of each task.
         """
-        heatmaps, anno_boxes, inds, masks, dist_weights, heatmap_weights = targets
+        heatmaps, anno_boxes, inds, masks, dist_weights = targets
         return_loss = 0
         return_loss_heatmap, return_loss_bbox = 0, 0
         for task_id, preds_dict in enumerate(preds_dicts):
-            # heatmap focal loss with distance-aware weighting
+            # heatmap focal loss
             preds_dict[0]['heatmap'] = clip_sigmoid(preds_dict[0]['heatmap'])
             num_pos = heatmaps[task_id].eq(1).float().sum().item()
             cls_avg_factor = torch.clamp(reduce_mean(
                 heatmaps[task_id].new_tensor(num_pos)),
                                          min=1).item()
-            # Frontal 场景不加 heatmap weight，避免虹吸中间段
-            scenario = self.train_cfg.get('scenario', 'oblique')
-            if scenario == 'frontal':
-                hw = torch.ones_like(heatmap_weights[task_id])
-            else:
-                hw = heatmap_weights[task_id]
             loss_heatmap = self.loss_cls(preds_dict[0]['heatmap'],
                                          heatmaps[task_id],
-                                         weight=hw,
                                          avg_factor=cls_avg_factor)
             target_box = anno_boxes[task_id]
             # reconstruct the anno_box from multiple reg heads
@@ -411,7 +371,7 @@ class BEVDepthHead(CenterHead):
             mask *= isnotnan
             code_weights = self.train_cfg['code_weights']
             # ===== Apply distance-aware instance weights =====
-            dist_w = dist_weights[task_id].unsqueeze(2)
+            dist_w = dist_weights[task_id].unsqueeze(2)  # (B, max_objs, 1)
             bbox_weights = mask * mask.new_tensor(code_weights) * dist_w
             # =================================================
             loss_bbox = self.loss_bbox(pred,

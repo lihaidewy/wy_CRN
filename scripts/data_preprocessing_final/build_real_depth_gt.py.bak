@@ -1,0 +1,103 @@
+import os
+import re
+import numpy as np
+import cv2
+
+# ==============================================================================
+# 配置区域
+# ==============================================================================
+DATA_ROOT = "./data/my_formatted_data"
+RADAR_BEV_DIR = os.path.join(DATA_ROOT, "radar_bev_filter")
+DEPTH_GT_DIR = os.path.join(DATA_ROOT, "depth_gt")
+IMAGE_DIR = os.path.join(DATA_ROOT, "samples/CAM_FRONT") # 请确认是否有图片目录用于验证
+os.makedirs(DEPTH_GT_DIR, exist_ok=True)
+os.makedirs("./work_dirs/debug_radar_proj", exist_ok=True) # 验证图保存路径
+
+CAMERA_INTRINSIC = np.array([
+    [3325.5375505322445, 0.0, 1920.0],
+    [0.0, 3325.5375505322445, 1080.0],
+    [0.0, 0.0, 1.0]
+])
+
+H = 6.0 
+
+def build_real_depth_gt():
+    bin_files = sorted([f for f in os.listdir(RADAR_BEV_DIR) if f.endswith('.bin')])
+    print(f">>> 开始处理 {len(bin_files)} 帧雷达点云，监控点云过滤率...")
+    print("-" * 65)
+    print(f"{'Frame':<8} | {'Original':<10} | {'Kept':<10} | {'Rate':<10}")
+    print("-" * 65)
+
+    first_frame = True # 用于打印调试信息
+    test_img = None
+
+    for file_name in bin_files:
+        numbers = re.findall(r'\d+', file_name)
+        if not numbers: continue
+        frame_idx = int(numbers[-1])
+        
+        radar_points = np.fromfile(os.path.join(RADAR_BEV_DIR, file_name), dtype=np.float32).reshape(-1, 7)
+        total_pts = len(radar_points)
+        if total_pts == 0:
+            continue
+        
+        # ================= 🚨 核心修复：坐标系拨乱反正 🚨 =================
+        # 我们要组装出正确的 相机坐标系 (X右, Y下, Z前)
+        # 假设雷达坐标系为: radar_pts[:, 0] 是 X前， radar_pts[:, 1] 是 Y左， radar_pts[:, 2] 是 Z上
+        cam_z = radar_points[:, 0]        # 相机的深度 = 雷达的前方距离
+        cam_x = radar_points[:, 1]       # 相机的左右(向右为正) = 雷达的左右的反向
+        cam_y = H - radar_points[:, 2]    # 相机的上下(向下为正) = 相机高度 - 雷达点高度
+        # =================================================================
+
+        if first_frame and len(cam_z) > 0:
+            print(f"🔍 [第一帧探针] 修正后的前3个点坐标: ")
+            for i in range(min(3, len(cam_z))):
+                print(f"   点{i}: 深度(Z)={cam_z[i]:.2f}m, 横向(X)={cam_x[i]:.2f}m, 垂直(Y)={cam_y[i]:.2f}m")
+            first_frame = False
+
+        # 2. 安全过滤：剔除距离太近（跑到镜头后面或紧贴镜头）的点
+        valid_mask = cam_z > 0.5 
+        cam_z = cam_z[valid_mask]
+        cam_x = cam_x[valid_mask]
+        cam_y = cam_y[valid_mask]
+        
+        if len(cam_z) == 0:
+            print(f"{frame_idx:<8} | {total_pts:<10} | 0          | 0.00% (点全部过近)")
+            continue
+
+        # 3. 透视投影 (Pinhole)
+        u = (CAMERA_INTRINSIC[0, 0] * cam_x / cam_z) + CAMERA_INTRINSIC[0, 2]
+        v = (CAMERA_INTRINSIC[1, 1] * cam_y / cam_z) + CAMERA_INTRINSIC[1, 2]
+        
+        # 4. 图像边界过滤 (FOV 内)
+        in_view = (u >= 0) & (u <= 3840) & (v >= 0) & (v <= 2160)
+        
+        final_u = u[in_view].astype(int)
+        final_v = v[in_view].astype(int)
+        final_z = cam_z[in_view]
+        
+        # 5. 统计与保存
+        final_pts = len(final_z)
+        rate = (final_pts / total_pts * 100) if total_pts > 0 else 0
+        print(f"{frame_idx:<8} | {total_pts:<10} | {final_pts:<10} | {rate:<10.2f}%")
+        
+        depth_gt = np.stack([final_u, final_v, final_z], axis=1).astype(np.float32)
+        depth_gt.tofile(os.path.join(DEPTH_GT_DIR, f"{frame_idx}.png.bin"))
+
+        # 6. 抽一帧画图验证：雷达点有没有打在车上？
+        if final_pts > 0 and test_img is None:
+            img_path = os.path.join(IMAGE_DIR, f"{frame_idx}.png")
+            if os.path.exists(img_path):
+                test_img = cv2.imread(img_path)
+                for i in range(final_pts):
+                    # 根据深度上色：近红远蓝 (简化处理)
+                    color = (0, int(255 * (1 - min(final_z[i]/160, 1))), int(255 * min(final_z[i]/160, 1)))
+                    cv2.circle(test_img, (final_u[i], final_v[i]), 3, color, -1)
+                cv2.imwrite(f"./work_dirs/debug_radar_proj/radar_proj_{frame_idx}.jpg", test_img)
+                print(f"📸 已抽取第 {frame_idx} 帧，绘制雷达点投影图，保存在 ./work_dirs/debug_radar_proj/ 下！")
+        
+    print("-" * 65)
+    print("✅ 深度真值重建完毕！")
+
+if __name__ == "__main__":
+    build_real_depth_gt()

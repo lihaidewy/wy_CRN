@@ -1,0 +1,66 @@
+import os
+import numpy as np
+import pandas as pd
+
+DATA_ROOT = "./data/my_formatted_data"
+H = 6  # 物理安装高度
+OFFSET = 300000  # 新数据专属偏移量
+
+os.makedirs(os.path.join(DATA_ROOT, "samples/RADAR_FRONT"), exist_ok=True)
+
+def convert_excel_frame_to_bin(df_frame, frame_idx):
+    # 与你原来的逻辑完全一致
+    a_deg = df_frame["Angle"].values
+    r_val = df_frame["Range"].values
+    v_radial = df_frame["Speed"].values
+    snr_val = df_frame["SNR"].values
+    obj_id = df_frame["ID"].values
+    a_rad = np.deg2rad(a_deg)
+    
+    depth_sq = (r_val * np.cos(a_rad)) ** 2 - H ** 2
+    valid_mask = depth_sq > 0.1
+    depth_sq = depth_sq[valid_mask]
+    v_radial = v_radial[valid_mask]
+    snr_valid = snr_val[valid_mask]
+    id_valid = obj_id[valid_mask]
+    a_valid = a_rad[valid_mask]
+    
+    x_forward = np.sqrt(depth_sq)
+    y_left = -r_val[valid_mask] * np.sin(a_valid)
+    vx_forward = v_radial * np.cos(a_valid)
+    vy_left = -v_radial * np.sin(a_valid)
+    
+    num_points = len(x_forward)
+    radar_18ch = np.zeros((num_points, 18), dtype=np.float32)
+    radar_18ch[:, 0] = x_forward
+    radar_18ch[:, 1] = y_left
+    radar_18ch[:, 2] = 0.0
+    radar_18ch[:, 4] = id_valid
+    radar_18ch[:, 5] = snr_valid
+    radar_18ch[:, 6] = vx_forward
+    radar_18ch[:, 7] = vy_left
+    radar_18ch[:, 8] = vx_forward
+    radar_18ch[:, 9] = vy_left
+    
+    # 使用加上偏移量后的新帧号保存
+    bin_filename = f"samples/RADAR_FRONT/radar_{frame_idx:06d}.pcd.bin"
+    radar_18ch.tofile(os.path.join(DATA_ROOT, bin_filename))
+    return bin_filename, num_points
+
+def process_new_radar():
+    # csv_path = "data/radar_data/S1m_flag.csv"
+    # csv_path = "data/radar_data/S1m_flag_test.csv"
+    csv_path = "data/radar_data/S1s_flag_test.csv"
+    print(f"正在读取新场景雷达数据: {csv_path} ...")
+    df_all = pd.read_csv(csv_path)
+    
+    grouped = df_all.groupby("Frame")
+    for frame_idx, df_frame in grouped:
+        
+        new_frame_idx = int(frame_idx) + OFFSET
+        rel_path, num_pts = convert_excel_frame_to_bin(df_frame, new_frame_idx)
+        print(f"[✓] 新帧 {new_frame_idx} 转换成功 ({num_pts} 个点) -> {rel_path}")
+
+if __name__ == "__main__":
+    process_new_radar()
+    print("✅ 步骤一：新雷达数据已全部转换并入库！")

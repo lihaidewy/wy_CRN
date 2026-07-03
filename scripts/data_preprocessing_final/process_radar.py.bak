@@ -1,0 +1,101 @@
+import os
+import numpy as np
+import pandas as pd
+
+# ==============================================================================
+# 1. 物理环境配置
+# ==============================================================================
+DATA_ROOT = "./data/my_formatted_data"
+H = 6  #  请在此处填写你们龙门架的实际物理安装高度（单位：米）
+
+# 创建符合 nuScenes 规范的雷达原始样本目录
+os.makedirs(os.path.join(DATA_ROOT, "samples/RADAR_FRONT"), exist_ok=True)
+
+# ==============================================================================
+# 2. 核心数学解算与二进制打包函数
+# ==============================================================================
+def convert_excel_frame_to_bin(df_frame, frame_idx):
+    """
+    接收 Excel 中的单帧数据，对齐真实表头进行解算，并导出为标准的 18 通道二进制流
+    """
+    frame = df_frame["Frame"].values
+    a_deg = df_frame["Angle"].values
+    r_val = df_frame["Range"].values
+    v_radial = df_frame["Speed"].values
+    snr_val = df_frame["SNR"].values
+    obj_id = df_frame["ID"].values
+    
+    # 角度转弧度
+    a_rad = np.deg2rad(a_deg)
+    
+    # =================  核心修复：严谨的物理几何解算  =================
+    # r_val * cos(a_rad) 是斜距在地面投影的“前方深度”向量
+    depth_sq = (r_val * np.cos(a_rad)) ** 2 - H ** 2
+    
+    # 物理盲区过滤：过滤掉斜距小于安装高度的噪点，防止开根号出现 NaN
+    valid_mask = depth_sq > 0.1
+    depth_sq = depth_sq[valid_mask]
+    v_radial = v_radial[valid_mask]
+    snr_valid = snr_val[valid_mask]
+    id_valid = obj_id[valid_mask]
+    a_valid = a_rad[valid_mask]
+    
+    # 1. 计算前方深度 (X 轴)
+    x_forward = np.sqrt(depth_sq)
+    
+    # 2. 计算左右偏离 (Y 轴，假设雷达右侧为正角，则 -sin(a) 让右侧为负，符合世界坐标系 Y 指向左侧)
+    y_left = -r_val[valid_mask] * np.sin(a_valid)
+    
+    # 3. 运动速度分解 (同理：cos对应前方 X 轴，sin对应左右 Y 轴)
+    vx_forward = v_radial * np.cos(a_valid)
+    vy_left = -v_radial * np.sin(a_valid)
+    # ====================================================================
+    
+    num_points = len(x_forward)
+    
+    # 构建 nuScenes 标准的 18 通道浮点矩阵
+    radar_18ch = np.zeros((num_points, 18), dtype=np.float32)
+    
+    #  按照标准：[0]是前向深度X, [1]是侧向偏离Y, [2]是高度Z
+    radar_18ch[:, 0] = x_forward                     # [0] 正前方深度 X
+    radar_18ch[:, 1] = y_left                        # [1] 左右侧偏离 Y
+    radar_18ch[:, 2] = 0.0                           # [2] Z 轴贴地归 0
+    radar_18ch[:, 4] = id_valid                      # [4] Object_ID
+    radar_18ch[:, 5] = snr_valid                     # [5] SNR 替代 RCS
+    
+    #  速度也必须对齐：[6][8]是前向速度X, [7][9]是侧向速度Y
+    radar_18ch[:, 6] = vx_forward                    # [6] 前向速度 vx
+    radar_18ch[:, 7] = vy_left                       # [7] 侧向速度 vy
+    radar_18ch[:, 8] = vx_forward                    # [8] 绝对速度 vx_comp
+    radar_18ch[:, 9] = vy_left                       # [9] 绝对速度 vy_comp
+    
+    # 导出为标准的二进制文件
+    bin_filename = f"samples/RADAR_FRONT/radar_{frame_idx:06d}.pcd.bin"
+    radar_18ch.tofile(os.path.join(DATA_ROOT, bin_filename))
+    return bin_filename, num_points
+
+# ==============================================================================
+# 3. 真实文件读取入口（请根据你的数据存放形式进行二选一修改）
+# ==============================================================================
+
+# 所有帧的数据都在同一个大 Excel 里面，靠一列（假设叫 frame_no）来区分
+def load_from_single_large_excel(excel_path):
+    print(f"正在读取 Excel 文件: {excel_path} ...")
+    df_all = pd.read_csv(excel_path)
+    
+    # 替换为你大 Excel 中代表帧号或时间戳的列名
+    frame_column_name = "Frame" 
+    grouped = df_all.groupby(frame_column_name)
+    
+    for frame_idx, df_frame in grouped:
+        rel_path, num_pts = convert_excel_frame_to_bin(df_frame, int(frame_idx))
+        print(f"[✓] 帧 {int(frame_idx)} 转换成功 ({num_pts} 个点) -> {rel_path}")
+
+
+
+if __name__ == "__main__":
+    # ==================== 实操运行区 ====================
+    #  请取消下方契合你实际情况的某一个函数的注释，并修改为你的真实路径：
+    load_from_single_large_excel("data/radar_data/S1s_flag.csv")
+    
+    print(">>> 步骤一脚本配置就绪，请修改主函数路径并取消注释以运行真实 Excel 转换。")

@@ -5,7 +5,6 @@ from argparse import ArgumentParser
 
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.model_summary import ModelSummary
-from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
 from callbacks.ema import EMACallback
 from utils.torch_dist import all_gather_object, synchronize
@@ -38,12 +37,12 @@ def run_cli(model_class=BEVDepthLightningModel,
     parser = BEVDepthLightningModel.add_model_specific_args(parent_parser)
     parser.set_defaults(profiler='simple',
                         deterministic=False,
-                        max_epochs=50,
+                        max_epochs=24,# 24
                         # strategy='ddp',
                         # strategy='single_device',
                         # strategy='ddp_find_unused_parameters_false',
                         num_sanity_val_steps=0,
-                        check_val_every_n_epoch=2,  # 每2个epoch验证一次，减少验证开销
+                        check_val_every_n_epoch=1,
                         gradient_clip_val=5,
                         limit_val_batches=0.25,
                         log_every_n_steps=50,
@@ -55,50 +54,16 @@ def run_cli(model_class=BEVDepthLightningModel,
         pl.seed_everything(args.seed)
 
     model = model_class(**vars(args))
-    # 每隔 8 个 epoch 保存中间权重，方便观察不同阶段的收敛情况
-    # save_last=True 确保训练结束时始终保留最后一个 epoch 的权重
-    checkpoint_callback = ModelCheckpoint(
-        every_n_epochs=8,
-        save_top_k=-1,
-        save_last=True,
-    )
-
-    # EarlyStopping: 监控验证集 detection loss，连续 5 个 epoch 不改善则自动停止
-    early_stop_callback = EarlyStopping(
-        monitor='val/detection',
-        min_delta=0.001,
-        patience=10,
-        verbose=True,
-        mode='min',
-        check_on_train_epoch_end=False,  # 只在 validation end 检查，避免 ckpt 恢复时 metric 缺失报错
-    )
-
-    # 训练进度通知回调（可选，通过环境变量 SERVERCHAN_KEY 配置微信推送）
-    notify_callback = None
-    _notify_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts', 'notify_callback.py')
-    if os.path.exists(_notify_path) and os.environ.get('SERVERCHAN_KEY', ''):
-        import importlib.util
-        _spec = importlib.util.spec_from_file_location('notify_callback', _notify_path)
-        _notify_mod = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(_notify_mod)
-        notify_callback = _notify_mod.NotifyCallback()
-
     if use_ema:
         train_dataloader = model.train_dataloader()
         ema_callback = EMACallback(
             len(train_dataloader.dataset) * args.max_epochs)
-        cb_list = [ema_callback, checkpoint_callback, early_stop_callback, ModelSummary(max_depth=3)]
-        if notify_callback:
-            cb_list.append(notify_callback)
-        trainer = pl.Trainer.from_argparse_args(args, callbacks=cb_list,
+        trainer = pl.Trainer.from_argparse_args(args, callbacks=[ema_callback, ModelSummary(max_depth=3)],
         accelerator="gpu",
         devices=[0]
         )
     else:
-        cb_list = [checkpoint_callback, early_stop_callback, ModelSummary(max_depth=3)]
-        if notify_callback:
-            cb_list.append(notify_callback)
-        trainer = pl.Trainer.from_argparse_args(args, callbacks=cb_list,
+        trainer = pl.Trainer.from_argparse_args(args, callbacks=[ModelSummary(max_depth=3)],
         accelerator="gpu",
         devices=[0])
         
@@ -121,26 +86,23 @@ def run_cli(model_class=BEVDepthLightningModel,
                             [])[:len_dataset]
         model.evaluator._format_bbox(all_pred_results, all_img_metas,
                                      os.path.dirname(args.ckpt_path))
-    # else:
-    #     # =====================================================================
-    #     #  增量训练 / 微调 
-    #     # =====================================================================
-    #     # 之前训练好的最优权重路径
-    #     pretrained_ckpt = "outputs/det/CRN_r50_256x704_128x128_4key/lightning_logs/version_81/checkpoints/epoch=23-step=4320.ckpt"
-        
-    #     if os.path.exists(pretrained_ckpt):
-    #         print(f" [增量训练] 正在提取记忆 (权重): {pretrained_ckpt}")
-    #         checkpoint = torch.load(pretrained_ckpt, map_location="cpu")
-            
-    #         # 严格把权重灌入当前模型中
-    #         model.load_state_dict(checkpoint['state_dict'], strict=True)
-    #         print(" 权重灌注成功！即将以全新的优化器状态，从 Epoch 0 开始增量微调...")
-    #     else:
-    #         print(f"⚠️ 警告：找不到权重文件 {pretrained_ckpt}，将从零开始训练！")
-
-    #     # 注意：这里千万不要加 ckpt_path 参数，让 Lightning 以为这是一个全新的训练任务
-    #     trainer.fit(model)
-    #     # =====================================================================
     else:
-        print("未加载任何历史检测权重")
-        trainer.fit(model, ckpt_path=args.ckpt_path)
+        # =====================================================================
+        #  增量训练 / 微调 
+        # =====================================================================
+        # 之前训练好的最优权重路径
+        pretrained_ckpt = "outputs/det/CRN_r50_256x704_128x128_4key/lightning_logs/version_81/checkpoints/epoch=23-step=4320.ckpt"
+        
+        if os.path.exists(pretrained_ckpt):
+            print(f" [增量训练] 正在提取记忆 (权重): {pretrained_ckpt}")
+            checkpoint = torch.load(pretrained_ckpt, map_location="cpu")
+            
+            # 严格把权重灌入当前模型中
+            model.load_state_dict(checkpoint['state_dict'], strict=True)
+            print(" 权重灌注成功！即将以全新的优化器状态，从 Epoch 0 开始增量微调...")
+        else:
+            print(f"⚠️ 警告：找不到权重文件 {pretrained_ckpt}，将从零开始训练！")
+
+        # 注意：这里千万不要加 ckpt_path 参数，让 Lightning 以为这是一个全新的训练任务
+        trainer.fit(model)
+        # =====================================================================
