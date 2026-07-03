@@ -250,3 +250,6 @@ extract_docx.js
 generate_merged_report*.js
 package.json
 package-lock.json
+
+# Corrupted temp filenames
+C*Users*
