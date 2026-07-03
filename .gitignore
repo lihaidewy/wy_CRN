@@ -204,7 +204,13 @@ train_log
 docs/api
 .code-workspace.code-workspace
 output
-outputs
+outputs/custom_vis_results/
+# Allow outputs/det/ configs but exclude large checkpoints/logs/images
+outputs/det/**/*.ckpt
+outputs/det/**/events.out.tfevents*
+outputs/det/**/*.jpg
+outputs/det/**/*.png
+outputs/det/**/*.pkl
 instant_test_output
 inference_test_output
 *.pkl
